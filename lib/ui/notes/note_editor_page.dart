@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/adaptive_icons.dart';
 import '../../core/app_colors.dart';
+import '../../core/body_inset.dart';
 import '../../core/date_format.dart';
 import '../../models/note.dart';
 import '../../state/notes_controller.dart';
@@ -31,6 +32,7 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
   TextEditingController(text: widget.note?.title ?? '');
   late final TextEditingController _content =
   TextEditingController(text: widget.note?.content ?? '');
+  final FocusNode _contentFocus = FocusNode();
   late bool _pinned = widget.note?.isPinned ?? false;
 
   /// Captured now so the save can still run while the page is animating away.
@@ -41,13 +43,26 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
   void initState() {
     super.initState();
     _controller = ref.read(notesControllerProvider.notifier);
+    _content.addListener(_refresh);
   }
 
   @override
   void dispose() {
+    _content.removeListener(_refresh);
     _title.dispose();
     _content.dispose();
+    _contentFocus.dispose();
     super.dispose();
+  }
+
+  void _refresh() {
+    if (mounted) setState(() {});
+  }
+
+  String get _stats {
+    final text = _content.text;
+    final words = RegExp(r'\S+').allMatches(text).length;
+    return '$words ${words == 1 ? 'word' : 'words'} · ${text.length} characters';
   }
 
   void _saveIfNeeded() {
@@ -155,32 +170,88 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
           top: false,
           child: SingleChildScrollView(
             keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+            padding: EdgeInsets.fromLTRB(16, 12 + bodyTopInset(context), 16, 24),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                AdaptiveTextField(
-                  controller: _title,
-                  placeholder: 'Title',
-                  autofocus: existing == null,
-                  textCapitalization: TextCapitalization.sentences,
-                  textInputAction: TextInputAction.next,
-                  style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w700,
+                // Tapping empty space inside the card starts typing.
+                GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onTap: _contentFocus.requestFocus,
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: cardBackground(context),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        CupertinoTextField(
+                          controller: _title,
+                          placeholder: 'Title',
+                          placeholderStyle: TextStyle(
+                            fontSize: 26,
+                            fontWeight: FontWeight.w700,
+                            color: tertiaryLabel(context),
+                          ),
+                          style: TextStyle(
+                            fontSize: 26,
+                            fontWeight: FontWeight.w700,
+                            color: primaryLabel(context),
+                          ),
+                          decoration: null,
+                          padding: EdgeInsets.zero,
+                          cursorColor: kAccent,
+                          autofocus: existing == null,
+                          keyboardType: TextInputType.text,
+                          textCapitalization: TextCapitalization.sentences,
+                          textInputAction: TextInputAction.next,
+                          maxLines: null,
+                          onSubmitted: (_) => _contentFocus.requestFocus(),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          child: Container(
+                            height: 0.5,
+                            color: CupertinoColors.separator.resolveFrom(
+                              context,
+                            ),
+                          ),
+                        ),
+                        CupertinoTextField(
+                          controller: _content,
+                          focusNode: _contentFocus,
+                          placeholder: 'Start writing...',
+                          placeholderStyle: TextStyle(
+                            fontSize: 17,
+                            color: tertiaryLabel(context),
+                          ),
+                          style: TextStyle(
+                            fontSize: 17,
+                            height: 1.4,
+                            color: primaryLabel(context),
+                          ),
+                          decoration: null,
+                          padding: EdgeInsets.zero,
+                          cursorColor: kAccent,
+                          keyboardType: TextInputType.multiline,
+                          textCapitalization: TextCapitalization.sentences,
+                          minLines: 14,
+                          maxLines: null,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                const SizedBox(height: 12),
-                AdaptiveTextField(
-                  controller: _content,
-                  placeholder: 'Start writing...',
-                  keyboardType: TextInputType.multiline,
-                  textCapitalization: TextCapitalization.sentences,
-                  minLines: 12,
-                  maxLines: null,
+                const SizedBox(height: 14),
+                Text(
+                  _stats,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 12, color: tertiaryLabel(context)),
                 ),
                 if (existing != null) ...<Widget>[
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 4),
                   Text(
                     'Edited ${formatNoteDate(existing.updatedAt)}',
                     textAlign: TextAlign.center,

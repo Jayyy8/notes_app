@@ -2,6 +2,8 @@ import 'package:adaptive_platform_ui/adaptive_platform_ui.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/app_colors.dart';
+import '../../core/body_inset.dart';
 import '../../models/note.dart';
 import '../../state/notes_controller.dart';
 import '../widgets/skeleton_scope.dart';
@@ -34,6 +36,9 @@ class NotesListView extends ConsumerWidget {
     final showError =
         !showSkeleton && state.error != null && state.notes.isEmpty;
 
+    // Section headings only make sense on the main tab, when not searching.
+    final items = _buildItems(notes, showHeadings: !pinnedOnly && !isSearching);
+
     return CustomScrollView(
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       // Bouncing physics on every platform so pull-to-refresh also works on Android.
@@ -44,6 +49,7 @@ class NotesListView extends ConsumerWidget {
         CupertinoSliverRefreshControl(
           onRefresh: () => controller.load(silent: true),
         ),
+        SliverToBoxAdapter(child: SizedBox(height: bodyTopInset(context))),
         SliverToBoxAdapter(
           child: _SearchField(
             initialText: state.query,
@@ -73,13 +79,37 @@ class NotesListView extends ConsumerWidget {
             )
           else
             SliverList.builder(
-              itemCount: notes.length,
-              itemBuilder: (context, index) => NoteRow(note: notes[index]),
+              itemCount: items.length,
+              itemBuilder: (context, index) {
+                final item = items[index];
+                if (item is Note) return NoteRow(note: item);
+                return _SectionHeader(title: item as String);
+              },
             ),
         if (!showError && (showSkeleton || notes.isNotEmpty))
           SliverToBoxAdapter(child: SizedBox(height: bottomPadding)),
       ],
     );
+  }
+
+  /// Notes (already pinned-first) with "Pinned" / "Notes" headings mixed in.
+  List<Object> _buildItems(List<Note> notes, {required bool showHeadings}) {
+    if (!showHeadings) return List<Object>.of(notes);
+
+    final pinned = notes.where((n) => n.isPinned).toList();
+    final others = notes.where((n) => !n.isPinned).toList();
+    final items = <Object>[];
+    if (pinned.isNotEmpty) {
+      items
+        ..add('Pinned')
+        ..addAll(pinned);
+    }
+    if (others.isNotEmpty) {
+      // A "Notes" heading is only useful when there is a "Pinned" one above it.
+      if (pinned.isNotEmpty) items.add('Notes');
+      items.addAll(others);
+    }
+    return items;
   }
 
   Widget _buildEmpty(BuildContext context, WidgetRef ref, bool isSearching) {
@@ -108,6 +138,29 @@ class NotesListView extends ConsumerWidget {
           onPressed: () => openNoteEditor(context, ref),
           label: 'New Note',
           style: AdaptiveButtonStyle.tinted,
+          color: kAccent,
+        ),
+      ),
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({required this.title});
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(22, 14, 22, 4),
+      child: Text(
+        title.toUpperCase(),
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.6,
+          color: secondaryLabel(context),
         ),
       ),
     );

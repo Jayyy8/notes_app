@@ -32,3 +32,8 @@ String _time(DateTime date) {
   final suffix = date.hour < 12 ? 'AM' : 'PM';
   return '$hour:$minute $suffix';
 }
+
+/// "Oct 14, 2026"
+String formatFullDate(DateTime date) {
+  return '${_months[date.month - 1]} ${date.day}, ${date.year}';
+}

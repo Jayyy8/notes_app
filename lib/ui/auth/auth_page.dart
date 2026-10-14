@@ -1,12 +1,15 @@
 import 'package:adaptive_platform_ui/adaptive_platform_ui.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' show AuthException;
 
 import '../../core/app_colors.dart';
 import '../../core/errors.dart';
 import '../../state/core_providers.dart';
+import 'verify_code_view.dart';
 
 /// Email + password sign in / sign up, using Supabase Auth.
+/// New accounts confirm their email with a one-time code.
 class AuthPage extends ConsumerStatefulWidget {
   const AuthPage({super.key});
 
@@ -22,7 +25,9 @@ class _AuthPageState extends ConsumerState<AuthPage> {
   bool _isSignUp = false;
   bool _loading = false;
   String? _error;
-  String? _info;
+
+  /// When set, we show the "enter your code" screen for this address.
+  String? _pendingEmail;
 
   @override
   void dispose() {
@@ -45,11 +50,25 @@ class _AuthPageState extends ConsumerState<AuthPage> {
     return null;
   }
 
+  bool _isUnconfirmed(Object error) {
+    return error is AuthException &&
+        error.message.toLowerCase().contains('not confirmed');
+  }
+
   void _toggleMode() {
     setState(() {
       _isSignUp = !_isSignUp;
       _error = null;
-      _info = null;
+      _confirm.clear();
+    });
+  }
+
+  void _leaveVerification() {
+    setState(() {
+      _pendingEmail = null;
+      _isSignUp = false;
+      _error = null;
+      _password.clear();
       _confirm.clear();
     });
   }
@@ -61,17 +80,13 @@ class _AuthPageState extends ConsumerState<AuthPage> {
     final password = _password.text;
     final problem = _validate(email, password);
     if (problem != null) {
-      setState(() {
-        _error = problem;
-        _info = null;
-      });
+      setState(() => _error = problem);
       return;
     }
 
     setState(() {
       _loading = true;
       _error = null;
-      _info = null;
     });
 
     final auth = ref.read(authRepositoryProvider);
@@ -79,21 +94,25 @@ class _AuthPageState extends ConsumerState<AuthPage> {
       if (_isSignUp) {
         final signedIn = await auth.signUp(email: email, password: password);
         if (!signedIn && mounted) {
-          // Email confirmation is switched on for this Supabase project.
-          setState(() {
-            _isSignUp = false;
-            _password.clear();
-            _confirm.clear();
-            _info = 'Account created. Check your inbox to confirm your email, '
-                'then sign in.';
-          });
+          // Supabase emailed a code. Ask for it.
+          setState(() => _pendingEmail = email);
         }
       } else {
         await auth.signIn(email: email, password: password);
         // On success AuthGate swaps this page out automatically.
       }
     } catch (e) {
-      if (mounted) setState(() => _error = friendlyError(e));
+      if (!_isSignUp && _isUnconfirmed(e)) {
+        // They signed up earlier but never entered the code: send a new one.
+        try {
+          await auth.resendSignUpCode(email: email);
+        } catch (_) {
+          // The code screen has its own Resend button.
+        }
+        if (mounted) setState(() => _pendingEmail = email);
+      } else if (mounted) {
+        setState(() => _error = friendlyError(e));
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -101,6 +120,11 @@ class _AuthPageState extends ConsumerState<AuthPage> {
 
   @override
   Widget build(BuildContext context) {
+    final pending = _pendingEmail;
+    if (pending != null) {
+      return VerifyCodeView(email: pending, onBack: _leaveVerification);
+    }
+
     final title = _isSignUp ? 'Create account' : 'Welcome back';
     final subtitle = _isSignUp
         ? 'Sign up to keep your notes in sync.'
@@ -203,17 +227,6 @@ class _AuthPageState extends ConsumerState<AuthPage> {
                       ),
                     ),
                   ],
-                  if (_info != null) ...<Widget>[
-                    const SizedBox(height: 14),
-                    Text(
-                      _info!,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: CupertinoColors.systemGreen.resolveFrom(context),
-                      ),
-                    ),
-                  ],
                   const SizedBox(height: 22),
                   SizedBox(
                     height: 50,
@@ -222,6 +235,7 @@ class _AuthPageState extends ConsumerState<AuthPage> {
                       label: submitLabel,
                       style: AdaptiveButtonStyle.filled,
                       size: AdaptiveButtonSize.large,
+                      color: kAccent,
                       enabled: !_loading,
                     ),
                   ),
@@ -234,6 +248,7 @@ class _AuthPageState extends ConsumerState<AuthPage> {
                           ? 'Already have an account? Sign In'
                           : 'New here? Create an account',
                       style: AdaptiveButtonStyle.plain,
+                      color: kAccent,
                     ),
                   ),
                 ],
