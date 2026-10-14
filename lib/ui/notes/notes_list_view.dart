@@ -38,6 +38,7 @@ class NotesListView extends ConsumerWidget {
 
     // Section headings only make sense on the main tab, when not searching.
     final items = _buildItems(notes, showHeadings: !pinnedOnly && !isSearching);
+    final glass = PlatformInfo.isIOS26OrHigher();
 
     return CustomScrollView(
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
@@ -49,13 +50,31 @@ class NotesListView extends ConsumerWidget {
         CupertinoSliverRefreshControl(
           onRefresh: () => controller.load(silent: true),
         ),
-        SliverToBoxAdapter(child: SizedBox(height: bodyTopInset(context))),
-        SliverToBoxAdapter(
-          child: _SearchField(
-            initialText: state.query,
-            onChanged: controller.setQuery,
+        if (glass)
+        // iOS 26 only: a pinned glass pill; notes scroll underneath it.
+          SliverPersistentHeader(
+            pinned: true,
+            delegate: _SearchHeaderDelegate(
+              topInset: bodyTopInset(context),
+              backgroundColor: groupedBackground(context),
+              initialText: state.query,
+              onChanged: controller.setQuery,
+            ),
+          )
+        else ...<Widget>[
+          // Android and iOS 18: exactly the same layout as before.
+          SliverToBoxAdapter(child: SizedBox(height: bodyTopInset(context))),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              child: _SearchField(
+                initialText: state.query,
+                onChanged: controller.setQuery,
+                glass: false,
+              ),
+            ),
           ),
-        ),
+        ],
         if (showSkeleton)
           const SliverToBoxAdapter(child: _NotesSkeleton())
         else if (showError)
@@ -211,11 +230,65 @@ class _DeleteBackground extends StatelessWidget {
   }
 }
 
+/// Keeps the search bar pinned under the toolbar while the list scrolls.
+class _SearchHeaderDelegate extends SliverPersistentHeaderDelegate {
+  _SearchHeaderDelegate({
+    required this.topInset,
+    required this.backgroundColor,
+    required this.initialText,
+    required this.onChanged,
+  });
+
+  /// Space reserved for the floating iOS 26 toolbar (0 elsewhere).
+  final double topInset;
+  final Color backgroundColor;
+  final String initialText;
+  final ValueChanged<String> onChanged;
+
+  static const double _barHeight = 60;
+
+  @override
+  double get minExtent => topInset + _barHeight;
+
+  @override
+  double get maxExtent => topInset + _barHeight;
+
+  @override
+  Widget build(
+      BuildContext context,
+      double shrinkOffset,
+      bool overlapsContent,
+      ) {
+    final glass = PlatformInfo.isIOS26OrHigher();
+    return Container(
+      // Transparent on iOS 26 so notes show through the glass as they scroll.
+      color: glass ? null : backgroundColor,
+      padding: EdgeInsets.fromLTRB(16, topInset + 8, 16, 8),
+      child: _SearchField(
+        initialText: initialText,
+        onChanged: onChanged,
+        glass: glass,
+      ),
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _SearchHeaderDelegate oldDelegate) {
+    return oldDelegate.topInset != topInset ||
+        oldDelegate.backgroundColor != backgroundColor;
+  }
+}
+
 class _SearchField extends StatefulWidget {
-  const _SearchField({required this.initialText, required this.onChanged});
+  const _SearchField({
+    required this.initialText,
+    required this.onChanged,
+    required this.glass,
+  });
 
   final String initialText;
   final ValueChanged<String> onChanged;
+  final bool glass;
 
   @override
   State<_SearchField> createState() => _SearchFieldState();
@@ -233,15 +306,75 @@ class _SearchFieldState extends State<_SearchField> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-      child: AdaptiveTextField(
+    if (widget.glass) {
+      return _GlassSearchBox(
         controller: _controller,
-        placeholder: 'Search notes',
-        textInputAction: TextInputAction.search,
-        autocorrect: false,
-        prefixIcon: const Icon(CupertinoIcons.search),
         onChanged: widget.onChanged,
+      );
+    }
+    return AdaptiveTextField(
+      controller: _controller,
+      placeholder: 'Search notes',
+      textInputAction: TextInputAction.search,
+      autocorrect: false,
+      prefixIcon: const Icon(CupertinoIcons.search),
+      onChanged: widget.onChanged,
+    );
+  }
+}
+
+/// iOS 26 search pill: a native blur material (AdaptiveBlurView) with a thin
+/// light edge, so it reads as glass over the notes scrolling beneath it.
+class _GlassSearchBox extends StatelessWidget {
+  const _GlassSearchBox({required this.controller, required this.onChanged});
+
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = CupertinoTheme.brightnessOf(context) == Brightness.dark;
+    final radius = BorderRadius.circular(22);
+
+    return SizedBox(
+      height: 44,
+      child: AdaptiveBlurView(
+        borderRadius: radius,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: radius,
+            border: Border.all(
+              color: CupertinoColors.white.withValues(
+                alpha: isDark ? 0.16 : 0.7,
+              ),
+              width: 0.8,
+            ),
+          ),
+          child: CupertinoTextField(
+            controller: controller,
+            placeholder: 'Search notes',
+            placeholderStyle: TextStyle(
+              fontSize: 17,
+              color: secondaryLabel(context),
+            ),
+            style: TextStyle(fontSize: 17, color: primaryLabel(context)),
+            decoration: null,
+            cursorColor: kAccent,
+            autocorrect: false,
+            textInputAction: TextInputAction.search,
+            clearButtonMode: OverlayVisibilityMode.editing,
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            prefix: Padding(
+              padding: const EdgeInsets.only(left: 14, right: 8),
+              child: Icon(
+                CupertinoIcons.search,
+                size: 18,
+                color: secondaryLabel(context),
+              ),
+            ),
+            onChanged: onChanged,
+          ),
+        ),
       ),
     );
   }
